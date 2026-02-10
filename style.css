@@ -157,3 +157,13 @@ button:hover{ filter:brightness(1.1); }
   font-size: 12px;
   color: var(--text);
 }
+.entryHint{
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(30,42,68,0.9);
+  background: rgba(15,25,48,0.8);
+  border-radius: 12px;
+  line-height: 1.4;
+}
+.entryHint b{ color: #d7dbe7; }
+
