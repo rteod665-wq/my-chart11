@@ -7,71 +7,68 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <header>
-    <div class="title">롱/숏 신호 차트 (OB · FVG · Fakeout)</div>
-    <div class="controls">
-      <select id="symbol">
-        <option value="BTCUSDT">BTCUSDT</option>
-        <option value="ETHUSDT">ETHUSDT</option>
-        <option value="SOLUSDT">SOLUSDT</option>
-        <option value="XRPUSDT">XRPUSDT</option>
-        <option value="BNBUSDT">BNBUSDT</option>
-      </select>
-      <select id="tf">
-        <option value="1m">1m</option>
-        <option value="3m">3m</option>
-        <option value="5m" selected>5m</option>
-        <option value="15m">15m</option>
-        <option value="1h">1h</option>
-        <option value="4h">4h</option>
-      </select>
-      <select id="limit">
-        <option value="300">300개</option>
-        <option value="500" selected>500개</option>
-        <option value="800">800개</option>
-      </select>
-      <button id="reload">불러오기</button>
-      <button id="auto" data-on="0">자동갱신 OFF</button>
-      <select id="tf">
-  <option value="1s">1s</option>
-  <option value="1m">1m</option>
-  <option value="3m">3m</option>
-  <option value="5m" selected>5m</option>
-  <option value="15m">15m</option>
-  <option value="1h">1h</option>
-  <option value="4h">4h</option>
-</select>
+  <div id="wrap">
+    <div id="left">
+      <div class="topbar">
+        <div class="row">
+          <label>심볼</label>
+          <select id="symbol">
+            <option value="BTCUSDT" selected>BTCUSDT</option>
+            <option value="ETHUSDT">ETHUSDT</option>
+            <option value="SOLUSDT">SOLUSDT</option>
+            <option value="BNBUSDT">BNBUSDT</option>
+            <option value="XRPUSDT">XRPUSDT</option>
+          </select>
 
+          <label>봉</label>
+          <select id="tf">
+            <option value="1s">1s</option>
+            <option value="1m">1m</option>
+            <option value="3m">3m</option>
+            <option value="5m" selected>5m</option>
+            <option value="15m">15m</option>
+            <option value="1h">1h</option>
+            <option value="4h">4h</option>
+          </select>
+
+          <label>개수</label>
+          <input id="limit" type="number" min="220" max="1000" step="10" value="500" />
+        </div>
+
+        <div class="row">
+          <button id="reload">불러오기</button>
+          <button id="auto" data-on="1">실시간 ON</button>
+        </div>
+      </div>
+
+      <div id="chart"></div>
     </div>
-  </header>
 
-  <div class="wrap">
-    <div id="chart"></div>
-
-    <aside class="side">
-      <div id="signalBadge" class="badge b-wait">WAIT</div>
-      <div class="muted" id="signalSummary">데이터 불러오는 중…</div>
-
+    <div id="right">
       <div class="card">
-        <div class="k">현재가</div>
-        <div class="v" id="lastPrice">-</div>
-        <div class="k" style="margin-top:10px;">추세(EMA)</div>
-        <div class="v" id="trendText">-</div>
-        <div class="hint" style="margin-top:8px;">
-          * 투자 조언이 아닌 “신호 표시 도구”입니다. 오탐 가능.
+        <div class="h">
+          <div class="title">신호</div>
+          <div id="signalBadge" class="badge b-wait">WAIT</div>
         </div>
+        <div id="signalSummary" class="muted">대기…</div>
       </div>
 
       <div class="card">
-        <div class="k">근거</div>
-        <div class="v">
-          <ul id="reasons"></ul>
-        </div>
+        <div class="title">현재가</div>
+        <div id="lastPrice" class="big">-</div>
+        <div class="title" style="margin-top:10px;">추세(EMA)</div>
+        <div id="trendText" class="muted">-</div>
       </div>
-    </aside>
+
+      <div class="card">
+        <div class="title">근거</div>
+        <ul id="reasons" class="reasons"></ul>
+      </div>
+    </div>
   </div>
 
- <script src="https://cdn.jsdelivr.net/npm/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <!-- ✅ v4.2.0 고정 (setMarkers 등 호환) -->
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
