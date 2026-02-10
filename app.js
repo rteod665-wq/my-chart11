@@ -1,4 +1,3 @@
-// ---------- utils ----------
 const fmt = (n) => (n==null?'-':Number(n).toLocaleString(undefined,{maximumFractionDigits:2}));
 
 function ema(values, period){
@@ -34,7 +33,6 @@ function swingLow(candles, lookback=20){
   return {price:m, idx};
 }
 
-// FVG (간단)
 function detectLastFVG(candles, scan=120){
   let last = null;
   const start = Math.max(2, candles.length - scan);
@@ -46,7 +44,6 @@ function detectLastFVG(candles, scan=120){
   return last;
 }
 
-// Fakeout/Trap (간단)
 function detectFakeout(candles, lookback=25){
   const last = candles[candles.length-1];
   const prev = candles.slice(0, candles.length-1);
@@ -59,7 +56,6 @@ function detectFakeout(candles, lookback=25){
   return null;
 }
 
-// Order Block (초기형)
 function detectLastOB(candles, scan=180){
   const start = Math.max(5, candles.length - scan);
   let last = null;
@@ -98,7 +94,6 @@ function inZone(price, zone){
   return price >= lo && price <= hi;
 }
 
-// ---------- signal engine ----------
 function decideSignal(candles){
   const closes = candles.map(c=>c.close);
   const ema50 = ema(closes, 50);
@@ -140,10 +135,10 @@ function decideSignal(candles){
   if(diff >= 2) signal = "LONG";
   else if(diff <= -2) signal = "SHORT";
 
-  return { signal, reasons, lastClose, ema50: ema50.at(-1), ema200: ema200.at(-1), zones: {fvg, ob, fake} };
+  return { signal, reasons, lastClose, ema50: ema50.at(-1), ema200: ema200.at(-1) };
 }
 
-// ---------- chart ----------
+// ---------- chart (v4 compatible) ----------
 const chart = LightweightCharts.createChart(document.getElementById('chart'), {
   layout: { background: { color: '#101a2e' }, textColor: '#d7dbe7' },
   grid: { vertLines: { color: '#1e2a44' }, horzLines: { color: '#1e2a44' } },
@@ -151,9 +146,11 @@ const chart = LightweightCharts.createChart(document.getElementById('chart'), {
   rightPriceScale: { borderColor: '#223054' },
   crosshair: { mode: 1 }
 });
-const candleSeries = chart.addCandlestickSeries();
-const ema50Series = chart.addLineSeries({ lineWidth: 2 });
-const ema200Series = chart.addLineSeries({ lineWidth: 2 });
+
+// v4+: addSeries(...)
+const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries);
+const ema50Series  = chart.addSeries(LightweightCharts.LineSeries, { lineWidth: 2 });
+const ema200Series = chart.addSeries(LightweightCharts.LineSeries, { lineWidth: 2 });
 
 let autoTimer = null;
 
@@ -237,7 +234,7 @@ document.getElementById('auto').addEventListener('click', (e)=>{
     btn.dataset.on = "0";
     btn.textContent = "자동갱신 OFF";
   }else{
-    autoTimer = setInterval(()=>load().catch(()=>{}), 15000); // 15초마다 갱신
+    autoTimer = setInterval(()=>load().catch(()=>{}), 15000);
     btn.dataset.on = "1";
     btn.textContent = "자동갱신 ON (15초)";
   }
@@ -246,3 +243,4 @@ document.getElementById('auto').addEventListener('click', (e)=>{
 load().catch(e=>{
   document.getElementById('signalSummary').textContent = "에러: " + e.message;
 });
+
