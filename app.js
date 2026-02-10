@@ -21,6 +21,7 @@ const el = {
   lastPrice: document.getElementById("lastPrice"),
   trendText: document.getElementById("trendText"),
   reasons: document.getElementById("reasons"),
+  entryHint: document.getElementById("entryHint"),
 };
 
 const chartEl = document.getElementById("chart");
