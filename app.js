@@ -6,6 +6,11 @@ const BINANCE_WS_BASE = "wss://stream.binance.com:9443/ws";
 const EMA_FAST = 50;
 const EMA_SLOW = 200;
 
+// 상위 타임프레임 필터
+const HTF = "15m";          // 15분봉 추세 필터
+const ATR_PERIOD = 14;      // 변동성 필터
+const ATR_MIN_RATIO = 0.001; // (ATR / 가격) 최소 비율, 낮으면 횡보로 간주
+
 const UI_THROTTLE_MS = 120;
 const HEAVY_THROTTLE_MS = 900;
 
@@ -25,7 +30,6 @@ const el = {
 };
 
 const chartEl = document.getElementById("chart");
-const chartWrapEl = document.getElementById("chartWrap");
 const obLayer = document.getElementById("obLayer");
 
 // ================== UTILS ==================
@@ -61,35 +65,24 @@ function inZone(price, zone) {
   return price >= lo && price <= hi;
 }
 
+// ================== ATR ==================
+function calcATR(candles, period = 14) {
+  if (candles.length < period + 1) return null;
+  let sum = 0;
+  for (let i = candles.length - period; i < candles.length; i++) {
+    const c = candles[i];
+    const p = candles[i - 1];
+    const tr = Math.max(
+      c.high - c.low,
+      Math.abs(c.high - p.close),
+      Math.abs(c.low - p.close)
+    );
+    sum += tr;
+  }
+  return sum / period;
+}
+
 // ================== PATTERNS ==================
-function swingHigh(candles, lookback = 20, endIndex = null) {
-  const end = endIndex ?? candles.length - 1;
-  const start = Math.max(0, end - lookback + 1);
-  let m = -Infinity;
-  for (let i = start; i <= end; i++) m = Math.max(m, candles[i].high);
-  return m;
-}
-function swingLow(candles, lookback = 20, endIndex = null) {
-  const end = endIndex ?? candles.length - 1;
-  const start = Math.max(0, end - lookback + 1);
-  let m = Infinity;
-  for (let i = start; i <= end; i++) m = Math.min(m, candles[i].low);
-  return m;
-}
-
-function detectFakeoutAt(candles, i, lookback = 25) {
-  if (i <= 2) return null;
-  const last = candles[i];
-  const sh = swingHigh(candles, lookback, i - 1);
-  const sl = swingLow(candles, lookback, i - 1);
-  const upSweep = (last.high > sh) && (last.close < sh);
-  const downSweep = (last.low < sl) && (last.close > sl);
-  if (upSweep) return { type: "bear", level: sh };
-  if (downSweep) return { type: "bull", level: sl };
-  return null;
-}
-
-// ✅ 오더블럭(간단): 큰 임펄스 직전 마지막 반대 캔들
 function detectLastOB(candles, scan = 280) {
   const start = Math.max(5, candles.length - scan);
   let last = null;
@@ -115,6 +108,15 @@ function detectLastOB(candles, scan = 280) {
   return last;
 }
 
+// OB 안에서 반전 캔들(꼬리 + 되돌림)
+function isRejectionCandle(c) {
+  const body = Math.abs(c.close - c.open);
+  const upperWick = c.high - Math.max(c.close, c.open);
+  const lowerWick = Math.min(c.close, c.open) - c.low;
+  // 꼬리가 몸통보다 크면 거절 흔적으로 간주
+  return (upperWick > body * 1.2) || (lowerWick > body * 1.2);
+}
+
 // ================== CHART ==================
 const chart = LightweightCharts.createChart(chartEl, {
   layout: { background: { color: "#101a2e" }, textColor: "#d7dbe7" },
@@ -135,26 +137,15 @@ const chart = LightweightCharts.createChart(chartEl, {
   },
 });
 
-// ✅ v4 방식
 const candleSeries = chart.addCandlestickSeries();
 const emaFastSeries = chart.addLineSeries({ lineWidth: 2 });
 const emaSlowSeries = chart.addLineSeries({ lineWidth: 2 });
 
-function updateSecondsVisible(tf) {
-  const showSeconds = (tf === "1s" || tf === "1m" || tf === "3m" || tf === "5m");
-  chart.applyOptions({ timeScale: { timeVisible: true, secondsVisible: showSeconds } });
-}
-
-// ================== OB BOX OVERLAY ==================
+// ================== OB BOX ==================
 let obBoxEl = null;
-
 function clearOBBox() {
-  if (obBoxEl) {
-    obBoxEl.remove();
-    obBoxEl = null;
-  }
+  if (obBoxEl) { obBoxEl.remove(); obBoxEl = null; }
 }
-
 function drawOBBox(ob, startTimeSec, endTimeSec) {
   if (!ob) { clearOBBox(); return; }
 
@@ -165,7 +156,6 @@ function drawOBBox(ob, startTimeSec, endTimeSec) {
   const x2 = chart.timeScale().timeToCoordinate(endTimeSec);
   const y1 = candleSeries.priceToCoordinate(topPrice);
   const y2 = candleSeries.priceToCoordinate(botPrice);
-
   if ([x1, x2, y1, y2].some(v => v == null)) return;
 
   const left = Math.min(x1, x2);
@@ -178,12 +168,40 @@ function drawOBBox(ob, startTimeSec, endTimeSec) {
     obBoxEl.className = "ob-box";
     obLayer.appendChild(obBoxEl);
   }
-
   obBoxEl.classList.toggle("bear", ob.type === "bear");
   obBoxEl.style.left = `${left}px`;
   obBoxEl.style.top = `${top}px`;
   obBoxEl.style.width = `${Math.max(1, right - left)}px`;
   obBoxEl.style.height = `${Math.max(1, bottom - top)}px`;
+}
+
+// ================== ENTRY HINT ==================
+function setEntryHintText(tf, ob){
+  if(tf !== "5m"){
+    el.entryHint.innerHTML = `현재는 <b>${tf}</b>입니다. <b>5분봉(5m)</b> 기준 진입가를 보려면 봉을 5m로 바꿔주세요.`;
+    return;
+  }
+  if(!ob){
+    el.entryHint.textContent = "5분봉 기준: 최근 오더블럭(OB)이 아직 감지되지 않았어요.";
+    return;
+  }
+  const top = Math.max(ob.from, ob.to);
+  const bot = Math.min(ob.from, ob.to);
+  const mid = (top + bot) / 2;
+
+  if(ob.type === "bull"){
+    el.entryHint.innerHTML =
+      `✅ <b>5분봉 기준 롱 후보</b><br>` +
+      `진입 구간(OB): <b>${bot.toFixed(2)} ~ ${top.toFixed(2)}</b><br>` +
+      `추천 진입가(중앙 50%): <b>${mid.toFixed(2)}</b><br>` +
+      `손절 예시: OB 하단 <b>${(bot * 0.999).toFixed(2)}</b> 아래`;
+  }else{
+    el.entryHint.innerHTML =
+      `✅ <b>5분봉 기준 숏 후보</b><br>` +
+      `진입 구간(OB): <b>${bot.toFixed(2)} ~ ${top.toFixed(2)}</b><br>` +
+      `추천 진입가(중앙 50%): <b>${mid.toFixed(2)}</b><br>` +
+      `손절 예시: OB 상단 <b>${(top * 1.001).toFixed(2)}</b> 위`;
+  }
 }
 
 // ================== STATE ==================
@@ -199,8 +217,12 @@ let lastHeavyAt = 0;
 
 let lastSignal = "WAIT";
 let markers = [];
-
 let lastOB = null;
+
+// 상위 TF 상태
+let htfCandles = [];
+let htfEmaFast = null;
+let htfEmaSlow = null;
 
 // ================== REST ==================
 async function fetchHistory(symbol, interval, limit) {
@@ -221,7 +243,6 @@ async function fetchHistory(symbol, interval, limit) {
 function initEmaFromHistory() {
   emaFastPrev = null;
   emaSlowPrev = null;
-
   emaFastSeries.setData([]);
   emaSlowSeries.setData([]);
 
@@ -233,50 +254,87 @@ function initEmaFromHistory() {
   }
 }
 
+// 상위 TF EMA 계산
+function initHTF() {
+  htfEmaFast = null;
+  htfEmaSlow = null;
+  for (const c of htfCandles) {
+    htfEmaFast = emaNext(htfEmaFast, c.close, EMA_FAST);
+    htfEmaSlow = emaNext(htfEmaSlow, c.close, EMA_SLOW);
+  }
+}
+function htfTrend() {
+  if (htfEmaFast == null || htfEmaSlow == null) return null;
+  return htfEmaFast > htfEmaSlow ? "UP" : "DOWN";
+}
+
 // ================== SIGNAL ==================
 function computeSignalAtClose(iClosed) {
-  if (iClosed < 210) return "WAIT";
+  const reasons = [];
 
-  const trendUp = emaFastPrev > emaSlowPrev;
-  const fake = detectFakeoutAt(candles, iClosed, 25);
-
-  let scoreLong = 0, scoreShort = 0;
-  if (trendUp) scoreLong += 2; else scoreShort += 2;
-  if (fake?.type === "bull") scoreLong += 2;
-  if (fake?.type === "bear") scoreShort += 2;
-
-  const px = candles[iClosed].close;
-  if (lastOB) {
-    if (lastOB.type === "bull" && inZone(px, lastOB)) scoreLong += 2;
-    if (lastOB.type === "bear" && inZone(px, lastOB)) scoreShort += 2;
+  // 메인 TF는 5m에서만 신호
+  if (el.tf.value !== "5m") {
+    return { sig: "WAIT", reasons: ["메인 기준은 5분봉(5m)입니다."] };
   }
 
-  const diff = scoreLong - scoreShort;
-  if (diff >= 2) return "LONG";
-  if (diff <= -2) return "SHORT";
-  return "WAIT";
+  // 상위 TF 추세 필터
+  const trend = htfTrend();
+  if (!trend) {
+    return { sig: "WAIT", reasons: ["상위 TF 추세 계산 대기"] };
+  }
+  reasons.push(`상위(${HTF}) 추세: ${trend === "UP" ? "상승" : "하락"}`);
+
+  // 변동성 필터(ATR)
+  const atr = calcATR(candles, ATR_PERIOD);
+  if (!atr || (atr / candles[candles.length - 1].close) < ATR_MIN_RATIO) {
+    return { sig: "WAIT", reasons: [...reasons, "변동성 낮음(횡보장) → 거래 회피"] };
+  }
+  reasons.push("변동성 OK");
+
+  // OB 존재
+  if (!lastOB) {
+    return { sig: "WAIT", reasons: [...reasons, "오더블럭(OB) 없음"] };
+  }
+  reasons.push(`최근 OB: ${lastOB.type === "bull" ? "매수" : "매도"}`);
+
+  const c = candles[iClosed];
+
+  // OB 안으로 들어왔는지
+  if (!inZone(c.close, lastOB)) {
+    return { sig: "WAIT", reasons: [...reasons, "가격이 OB 구간 밖"] };
+  }
+  reasons.push("가격이 OB 구간 안");
+
+  // 반전 캔들 확인
+  if (!isRejectionCandle(c)) {
+    return { sig: "WAIT", reasons: [...reasons, "반전(거절) 캔들 미확인"] };
+  }
+  reasons.push("반전(거절) 캔들 확인");
+
+  // 방향 필터: OB 방향 + 상위 추세 일치만 허용
+  if (lastOB.type === "bull" && trend === "UP") {
+    return { sig: "LONG", reasons: [...reasons, "상위 추세 상승 + 매수 OB"] };
+  }
+  if (lastOB.type === "bear" && trend === "DOWN") {
+    return { sig: "SHORT", reasons: [...reasons, "상위 추세 하락 + 매도 OB"] };
+  }
+
+  return { sig: "WAIT", reasons: [...reasons, "상위 추세와 OB 방향 불일치"] };
 }
 
 // ================== WS ==================
 function stopWS() {
-  if (ws) {
-    try { wsWanted = false; ws.close(); } catch {}
-    ws = null;
-  }
+  if (ws) { try { wsWanted = false; ws.close(); } catch {} ws = null; }
 }
-
 function startWS(symbol, interval) {
   wsWanted = true;
   const stream = `${symbol.toLowerCase()}@kline_${interval}`;
   const url = `${BINANCE_WS_BASE}/${stream}`;
 
   el.summary.textContent = `실시간 연결중… (${symbol} ${interval})`;
-
   ws = new WebSocket(url);
 
-  ws.onopen = () => {
-    el.summary.textContent = `실시간 연결됨 ✅ (${symbol} ${interval})`;
-  };
+  ws.onopen = () => { el.summary.textContent = `실시간 연결됨 ✅ (${symbol} ${interval})`; };
 
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
@@ -296,15 +354,12 @@ function startWS(symbol, interval) {
     const last = candles[candles.length - 1];
     if (!last) return;
 
-    // 캔들 즉시 반영(바이낸스 느낌)
     if (bar.time > last.time) {
       candles.push(bar);
       const max = Number(el.limit.value);
       if (candles.length > max) candles.shift();
-
       candleSeries.update(bar);
 
-      // 확정 EMA 업데이트(새 캔들 시작)
       emaFastPrev = emaNext(emaFastPrev, bar.close, EMA_FAST);
       emaSlowPrev = emaNext(emaSlowPrev, bar.close, EMA_SLOW);
       emaFastSeries.update({ time: bar.time, value: emaFastPrev });
@@ -314,7 +369,6 @@ function startWS(symbol, interval) {
       candles[candles.length - 1] = bar;
       candleSeries.update(bar);
 
-      // 표시용 EMA(진행중)
       const fastDisplay = emaNext(emaFastPrev, bar.close, EMA_FAST);
       const slowDisplay = emaNext(emaSlowPrev, bar.close, EMA_SLOW);
       emaFastSeries.update({ time: bar.time, value: fastDisplay });
@@ -325,19 +379,15 @@ function startWS(symbol, interval) {
     if (now - lastUIAt >= UI_THROTTLE_MS) {
       lastUIAt = now;
       el.lastPrice.textContent = fmt(bar.close);
-
       const fastNow = emaNext(emaFastPrev, bar.close, EMA_FAST);
       const slowNow = emaNext(emaSlowPrev, bar.close, EMA_SLOW);
       el.trendText.textContent = `EMA${EMA_FAST} ${fmt(fastNow)} / EMA${EMA_SLOW} ${fmt(slowNow)}`;
     }
 
-    // 무거운 작업은 마감에서만
     if (isClosed) {
       if (now - lastHeavyAt >= HEAVY_THROTTLE_MS) {
         lastHeavyAt = now;
         lastOB = detectLastOB(candles);
-
-        // ✅ OB 박스 표시: OB 발생 캔들부터 ~ 최신 캔들까지
         if (lastOB) {
           const startTime = candles[lastOB.j]?.time ?? candles[lastOB.i]?.time ?? candles[0].time;
           const endTime = candles[candles.length - 1].time;
@@ -345,10 +395,11 @@ function startWS(symbol, interval) {
         } else {
           clearOBBox();
         }
+        setEntryHintText(el.tf.value, lastOB);
       }
 
       const iClosed = candles.length - 1;
-      const sig = computeSignalAtClose(iClosed);
+      const { sig, reasons } = computeSignalAtClose(iClosed);
 
       if (sig !== "WAIT" && sig !== lastSignal) {
         markers.push({
@@ -362,36 +413,17 @@ function startWS(symbol, interval) {
 
       lastSignal = sig;
       setBadge(sig);
-
-      const reasons = [];
-      reasons.push(emaFastPrev > emaSlowPrev ? `EMA${EMA_FAST} > EMA${EMA_SLOW} (상승 우위)` : `EMA${EMA_FAST} < EMA${EMA_SLOW} (하락 우위)`);
-      if (lastOB) reasons.push(`오더블럭(박스): ${lastOB.type === "bull" ? "매수 OB" : "매도 OB"}`);
-      reasons.push("마커: 신호 전환 시점만 표시");
       renderReasons(reasons);
-
       el.summary.textContent = sig === "LONG" ? "롱 우세" : sig === "SHORT" ? "숏 우세" : "관망";
     }
   };
 
-  ws.onerror = () => {
-    el.summary.textContent = "실시간 연결 오류 (네트워크/차단 가능)";
-  };
-
+  ws.onerror = () => { el.summary.textContent = "실시간 연결 오류"; };
   ws.onclose = () => {
     if (!wsWanted) return;
-    el.summary.textContent = "실시간 끊김… 재연결 시도";
-    setTimeout(() => {
-      if (wsWanted) startWS(el.symbol.value, el.tf.value);
-    }, 1200);
+    el.summary.textContent = "실시간 끊김… 재연결";
+    setTimeout(() => { if (wsWanted) startWS(el.symbol.value, el.tf.value); }, 1200);
   };
-}
-
-// ================== HELPERS ==================
-function redrawOB() {
-  if (!lastOB || !candles.length) return;
-  const startTime = candles[lastOB.j]?.time ?? candles[lastOB.i]?.time ?? candles[0].time;
-  const endTime = candles[candles.length - 1].time;
-  drawOBBox(lastOB, startTime, endTime);
 }
 
 // ================== MAIN ==================
@@ -400,17 +432,18 @@ async function fullReload() {
   const tf = el.tf.value;
   const limit = Number(el.limit.value);
 
-  updateSecondsVisible(tf);
-
-  el.summary.textContent = "초기 데이터 불러오는 중…";
+  el.summary.textContent = "데이터 불러오는 중…";
   setBadge("WAIT");
-
   stopWS();
 
+  // 메인 TF
   candles = await fetchHistory(symbol, tf, limit);
-
   candleSeries.setData(candles);
   initEmaFromHistory();
+
+  // 상위 TF
+  htfCandles = await fetchHistory(symbol, HTF, 300);
+  initHTF();
 
   lastOB = detectLastOB(candles);
   markers = [];
@@ -425,25 +458,24 @@ async function fullReload() {
   } else {
     clearOBBox();
   }
+  setEntryHintText(tf, lastOB);
 
   chart.timeScale().fitContent();
 
   if (el.auto.dataset.on === "1") startWS(symbol, tf);
-  else el.summary.textContent = "실시간 OFF (수동 불러오기만)";
+  else el.summary.textContent = "실시간 OFF (수동)";
 }
 
 // ================== EVENTS ==================
 el.reload.addEventListener("click", () => {
   fullReload().catch((e) => (el.summary.textContent = "에러: " + e.message));
 });
-
 el.tf.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 el.symbol.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 el.limit.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 
 el.auto.textContent = "실시간 ON";
 el.auto.dataset.on = "1";
-
 el.auto.addEventListener("click", () => {
   const on = el.auto.dataset.on === "1";
   if (on) {
@@ -451,7 +483,7 @@ el.auto.addEventListener("click", () => {
     el.auto.textContent = "실시간 OFF";
     wsWanted = false;
     stopWS();
-    el.summary.textContent = "실시간 OFF (수동 불러오기만)";
+    el.summary.textContent = "실시간 OFF (수동)";
   } else {
     el.auto.dataset.on = "1";
     el.auto.textContent = "실시간 ON";
@@ -459,10 +491,6 @@ el.auto.addEventListener("click", () => {
     startWS(el.symbol.value, el.tf.value);
   }
 });
-
-// ✅ 줌/스크롤/리사이즈에도 OB 박스 따라오게
-chart.timeScale().subscribeVisibleTimeRangeChange(() => redrawOB());
-window.addEventListener("resize", () => setTimeout(redrawOB, 0));
 
 // 최초 실행
 fullReload().catch((e) => (el.summary.textContent = "에러: " + e.message));
