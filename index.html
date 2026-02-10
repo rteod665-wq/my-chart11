@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>롱/숏 신호 차트 (OB/FVG/Fakeout)</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <div class="title">롱/숏 신호 차트 (OB · FVG · Fakeout)</div>
+    <div class="controls">
+      <select id="symbol">
+        <option value="BTCUSDT">BTCUSDT</option>
+        <option value="ETHUSDT">ETHUSDT</option>
+        <option value="SOLUSDT">SOLUSDT</option>
+        <option value="XRPUSDT">XRPUSDT</option>
+        <option value="BNBUSDT">BNBUSDT</option>
+      </select>
+      <select id="tf">
+        <option value="1m">1m</option>
+        <option value="3m">3m</option>
+        <option value="5m" selected>5m</option>
+        <option value="15m">15m</option>
+        <option value="1h">1h</option>
+        <option value="4h">4h</option>
+      </select>
+      <select id="limit">
+        <option value="300">300개</option>
+        <option value="500" selected>500개</option>
+        <option value="800">800개</option>
+      </select>
+      <button id="reload">불러오기</button>
+      <button id="auto" data-on="0">자동갱신 OFF</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div id="chart"></div>
+
+    <aside class="side">
+      <div id="signalBadge" class="badge b-wait">WAIT</div>
+      <div class="muted" id="signalSummary">데이터 불러오는 중…</div>
+
+      <div class="card">
+        <div class="k">현재가</div>
+        <div class="v" id="lastPrice">-</div>
+        <div class="k" style="margin-top:10px;">추세(EMA)</div>
+        <div class="v" id="trendText">-</div>
+        <div class="hint" style="margin-top:8px;">
+          * 투자 조언이 아닌 “신호 표시 도구”입니다. 오탐 가능.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="k">근거</div>
+        <div class="v">
+          <ul id="reasons"></ul>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
