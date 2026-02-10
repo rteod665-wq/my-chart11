@@ -73,20 +73,14 @@ button{
 }
 button:hover{ filter:brightness(1.1); }
 
-/* ✅ 차트 래퍼(오버레이 가능) */
 #chartWrap{
   position: relative;
   flex: 1 1 auto;
   min-height: 520px;
   width: 100%;
 }
+#chart{ position:absolute; inset:0; }
 
-#chart{
-  position:absolute;
-  inset:0;
-}
-
-/* ✅ OB 박스 레이어 */
 #obLayer{
   position:absolute;
   inset:0;
@@ -99,13 +93,11 @@ button:hover{ filter:brightness(1.1); }
   border: 1px solid rgba(46, 204, 113, 0.60);
   background: rgba(46, 204, 113, 0.18);
 }
-
 .ob-box.bear{
   border: 1px solid rgba(231, 76, 60, 0.60);
   background: rgba(231, 76, 60, 0.18);
 }
 
-/* 오른쪽 패널 */
 #right{
   width: 320px;
   display:flex;
@@ -157,6 +149,7 @@ button:hover{ filter:brightness(1.1); }
   font-size: 12px;
   color: var(--text);
 }
+
 .entryHint{
   margin-top: 10px;
   padding: 10px;
