@@ -6,9 +6,8 @@ const BINANCE_WS_BASE = "wss://stream.binance.com:9443/ws";
 const EMA_FAST = 50;
 const EMA_SLOW = 200;
 
-// “바이낸스처럼” 체감되는 업데이트 주기
-const UI_THROTTLE_MS = 120;     // 패널 텍스트 갱신
-const HEAVY_THROTTLE_MS = 800;  // OB/FVG 재검출(무거움)
+const UI_THROTTLE_MS = 120;
+const HEAVY_THROTTLE_MS = 900;
 
 // ================== DOM ==================
 const el = {
@@ -23,6 +22,10 @@ const el = {
   trendText: document.getElementById("trendText"),
   reasons: document.getElementById("reasons"),
 };
+
+const chartEl = document.getElementById("chart");
+const chartWrapEl = document.getElementById("chartWrap");
+const obLayer = document.getElementById("obLayer");
 
 // ================== UTILS ==================
 const fmt = (n) => (n == null ? "-" : Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 }));
@@ -61,31 +64,16 @@ function inZone(price, zone) {
 function swingHigh(candles, lookback = 20, endIndex = null) {
   const end = endIndex ?? candles.length - 1;
   const start = Math.max(0, end - lookback + 1);
-  let m = -Infinity, idx = -1;
-  for (let i = start; i <= end; i++) {
-    if (candles[i].high > m) { m = candles[i].high; idx = i; }
-  }
-  return { price: m, idx };
+  let m = -Infinity;
+  for (let i = start; i <= end; i++) m = Math.max(m, candles[i].high);
+  return m;
 }
 function swingLow(candles, lookback = 20, endIndex = null) {
   const end = endIndex ?? candles.length - 1;
   const start = Math.max(0, end - lookback + 1);
-  let m = Infinity, idx = -1;
-  for (let i = start; i <= end; i++) {
-    if (candles[i].low < m) { m = candles[i].low; idx = i; }
-  }
-  return { price: m, idx };
-}
-
-function detectLastFVG(candles, scan = 220) {
-  let last = null;
-  const start = Math.max(2, candles.length - scan);
-  for (let i = start; i < candles.length; i++) {
-    const a = candles[i - 2], c = candles[i];
-    if (a.high < c.low) last = { type: "bull", from: a.high, to: c.low, i };
-    else if (a.low > c.high) last = { type: "bear", from: c.high, to: a.low, i };
-  }
-  return last;
+  let m = Infinity;
+  for (let i = start; i <= end; i++) m = Math.min(m, candles[i].low);
+  return m;
 }
 
 function detectFakeoutAt(candles, i, lookback = 25) {
@@ -93,14 +81,14 @@ function detectFakeoutAt(candles, i, lookback = 25) {
   const last = candles[i];
   const sh = swingHigh(candles, lookback, i - 1);
   const sl = swingLow(candles, lookback, i - 1);
-  const upSweep = (last.high > sh.price) && (last.close < sh.price);
-  const downSweep = (last.low < sl.price) && (last.close > sl.price);
-  if (upSweep) return { type: "bear", level: sh.price };
-  if (downSweep) return { type: "bull", level: sl.price };
+  const upSweep = (last.high > sh) && (last.close < sh);
+  const downSweep = (last.low < sl) && (last.close > sl);
+  if (upSweep) return { type: "bear", level: sh };
+  if (downSweep) return { type: "bull", level: sl };
   return null;
 }
 
-// OB(간단): 큰 임펄스 직전 마지막 반대 캔들 구간
+// ✅ 오더블럭(간단): 큰 임펄스 직전 마지막 반대 캔들
 function detectLastOB(candles, scan = 280) {
   const start = Math.max(5, candles.length - scan);
   let last = null;
@@ -127,14 +115,13 @@ function detectLastOB(candles, scan = 280) {
 }
 
 // ================== CHART ==================
-const chart = LightweightCharts.createChart(document.getElementById("chart"), {
+const chart = LightweightCharts.createChart(chartEl, {
   layout: { background: { color: "#101a2e" }, textColor: "#d7dbe7" },
   grid: { vertLines: { color: "#1e2a44" }, horzLines: { color: "#1e2a44" } },
   timeScale: { timeVisible: true, secondsVisible: true },
   rightPriceScale: { borderColor: "#223054" },
   crosshair: { mode: 1 },
   localization: {
-    // ✅ 한국시간 표시
     timeFormatter: (timeSec) => {
       const d = new Date(timeSec * 1000);
       return new Intl.DateTimeFormat("ko-KR", {
@@ -147,48 +134,55 @@ const chart = LightweightCharts.createChart(document.getElementById("chart"), {
   },
 });
 
-// ✅ v3/v4/v5 호환: addSeries 있으면 그걸 쓰고, 없으면 v3 방식 사용
-const hasAddSeries = typeof chart.addSeries === "function";
-
-const candleSeries = hasAddSeries
-  ? chart.addSeries(LightweightCharts.CandlestickSeries)
-  : chart.addCandlestickSeries();
-
-const emaFastSeries = hasAddSeries
-  ? chart.addSeries(LightweightCharts.LineSeries, { lineWidth: 2 })
-  : chart.addLineSeries({ lineWidth: 2 });
-
-const emaSlowSeries = hasAddSeries
-  ? chart.addSeries(LightweightCharts.LineSeries, { lineWidth: 2 })
-  : chart.addLineSeries({ lineWidth: 2 });
-
-
-// OB/FVG 라인
-let obTop = null, obBot = null, fvgTop = null, fvgBot = null;
-function clearZoneLines() {
-  if (obTop) { candleSeries.removePriceLine(obTop); obTop = null; }
-  if (obBot) { candleSeries.removePriceLine(obBot); obBot = null; }
-  if (fvgTop) { candleSeries.removePriceLine(fvgTop); fvgTop = null; }
-  if (fvgBot) { candleSeries.removePriceLine(fvgBot); fvgBot = null; }
-}
-function drawZoneLines(zone, kind) {
-  if (!zone) return;
-  const lo = Math.min(zone.from, zone.to);
-  const hi = Math.max(zone.from, zone.to);
-  const title = (kind === "OB")
-    ? (zone.type === "bull" ? "OB(buy)" : "OB(sell)")
-    : (zone.type === "bull" ? "FVG(bull)" : "FVG(bear)");
-
-  const top = candleSeries.createPriceLine({ price: hi, title: `${title} hi`, lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
-  const bot = candleSeries.createPriceLine({ price: lo, title: `${title} lo`, lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
-
-  if (kind === "OB") { obTop = top; obBot = bot; }
-  else { fvgTop = top; fvgBot = bot; }
-}
+// ✅ v4 방식
+const candleSeries = chart.addCandlestickSeries();
+const emaFastSeries = chart.addLineSeries({ lineWidth: 2 });
+const emaSlowSeries = chart.addLineSeries({ lineWidth: 2 });
 
 function updateSecondsVisible(tf) {
   const showSeconds = (tf === "1s" || tf === "1m" || tf === "3m" || tf === "5m");
   chart.applyOptions({ timeScale: { timeVisible: true, secondsVisible: showSeconds } });
+}
+
+// ================== OB BOX OVERLAY ==================
+let obBoxEl = null;
+
+function clearOBBox() {
+  if (obBoxEl) {
+    obBoxEl.remove();
+    obBoxEl = null;
+  }
+}
+
+function drawOBBox(ob, startTimeSec, endTimeSec) {
+  if (!ob) { clearOBBox(); return; }
+
+  const topPrice = Math.max(ob.from, ob.to);
+  const botPrice = Math.min(ob.from, ob.to);
+
+  const x1 = chart.timeScale().timeToCoordinate(startTimeSec);
+  const x2 = chart.timeScale().timeToCoordinate(endTimeSec);
+  const y1 = candleSeries.priceToCoordinate(topPrice);
+  const y2 = candleSeries.priceToCoordinate(botPrice);
+
+  if ([x1, x2, y1, y2].some(v => v == null)) return;
+
+  const left = Math.min(x1, x2);
+  const right = Math.max(x1, x2);
+  const top = Math.min(y1, y2);
+  const bottom = Math.max(y1, y2);
+
+  if (!obBoxEl) {
+    obBoxEl = document.createElement("div");
+    obBoxEl.className = "ob-box";
+    obLayer.appendChild(obBoxEl);
+  }
+
+  obBoxEl.classList.toggle("bear", ob.type === "bear");
+  obBoxEl.style.left = `${left}px`;
+  obBoxEl.style.top = `${top}px`;
+  obBoxEl.style.width = `${Math.max(1, right - left)}px`;
+  obBoxEl.style.height = `${Math.max(1, bottom - top)}px`;
 }
 
 // ================== STATE ==================
@@ -196,7 +190,7 @@ let candles = [];
 let ws = null;
 let wsWanted = true;
 
-let emaFastPrev = null;  // 확정 EMA(마감/신캔들 기준)
+let emaFastPrev = null;
 let emaSlowPrev = null;
 
 let lastUIAt = 0;
@@ -206,11 +200,9 @@ let lastSignal = "WAIT";
 let markers = [];
 
 let lastOB = null;
-let lastFVG = null;
 
-// ================== REST (초기 히스토리) ==================
+// ================== REST ==================
 async function fetchHistory(symbol, interval, limit) {
-  // timeZone=9 (KST 기준으로 구간 해석)
   const url = `${BINANCE_REST}?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(limit)}&timeZone=9`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("Binance REST 오류");
@@ -228,6 +220,10 @@ async function fetchHistory(symbol, interval, limit) {
 function initEmaFromHistory() {
   emaFastPrev = null;
   emaSlowPrev = null;
+
+  emaFastSeries.setData([]);
+  emaSlowSeries.setData([]);
+
   for (const c of candles) {
     emaFastPrev = emaNext(emaFastPrev, c.close, EMA_FAST);
     emaSlowPrev = emaNext(emaSlowPrev, c.close, EMA_SLOW);
@@ -236,7 +232,7 @@ function initEmaFromHistory() {
   }
 }
 
-// ================== SIGNAL (마감 캔들 기준) ==================
+// ================== SIGNAL ==================
 function computeSignalAtClose(iClosed) {
   if (iClosed < 210) return "WAIT";
 
@@ -249,10 +245,6 @@ function computeSignalAtClose(iClosed) {
   if (fake?.type === "bear") scoreShort += 2;
 
   const px = candles[iClosed].close;
-  if (lastFVG) {
-    if (lastFVG.type === "bull" && inZone(px, lastFVG)) scoreLong += 2;
-    if (lastFVG.type === "bear" && inZone(px, lastFVG)) scoreShort += 2;
-  }
   if (lastOB) {
     if (lastOB.type === "bull" && inZone(px, lastOB)) scoreLong += 2;
     if (lastOB.type === "bear" && inZone(px, lastOB)) scoreShort += 2;
@@ -303,7 +295,7 @@ function startWS(symbol, interval) {
     const last = candles[candles.length - 1];
     if (!last) return;
 
-    // ✅ 캔들 즉시 반영(바이낸스 느낌 핵심)
+    // 캔들 즉시 반영(바이낸스 느낌)
     if (bar.time > last.time) {
       candles.push(bar);
       const max = Number(el.limit.value);
@@ -311,7 +303,7 @@ function startWS(symbol, interval) {
 
       candleSeries.update(bar);
 
-      // 확정 EMA는 새 캔들 시작(close) 시 업데이트
+      // 확정 EMA 업데이트(새 캔들 시작)
       emaFastPrev = emaNext(emaFastPrev, bar.close, EMA_FAST);
       emaSlowPrev = emaNext(emaSlowPrev, bar.close, EMA_SLOW);
       emaFastSeries.update({ time: bar.time, value: emaFastPrev });
@@ -321,14 +313,13 @@ function startWS(symbol, interval) {
       candles[candles.length - 1] = bar;
       candleSeries.update(bar);
 
-      // 표시용 EMA(진행 중 close 반영) — prev를 망가뜨리지 않게 “표시용”만 계산해서 update
+      // 표시용 EMA(진행중)
       const fastDisplay = emaNext(emaFastPrev, bar.close, EMA_FAST);
       const slowDisplay = emaNext(emaSlowPrev, bar.close, EMA_SLOW);
       emaFastSeries.update({ time: bar.time, value: fastDisplay });
       emaSlowSeries.update({ time: bar.time, value: slowDisplay });
     }
 
-    // 패널 텍스트는 스로틀
     const now = Date.now();
     if (now - lastUIAt >= UI_THROTTLE_MS) {
       lastUIAt = now;
@@ -339,22 +330,25 @@ function startWS(symbol, interval) {
       el.trendText.textContent = `EMA${EMA_FAST} ${fmt(fastNow)} / EMA${EMA_SLOW} ${fmt(slowNow)}`;
     }
 
-    // 무거운 작업은 “마감”에서만
+    // 무거운 작업은 마감에서만
     if (isClosed) {
-      // OB/FVG 갱신
       if (now - lastHeavyAt >= HEAVY_THROTTLE_MS) {
         lastHeavyAt = now;
         lastOB = detectLastOB(candles);
-        lastFVG = detectLastFVG(candles);
-        clearZoneLines();
-        drawZoneLines(lastOB, "OB");
-        drawZoneLines(lastFVG, "FVG");
+
+        // ✅ OB 박스 표시: OB 발생 캔들부터 ~ 최신 캔들까지
+        if (lastOB) {
+          const startTime = candles[lastOB.j]?.time ?? candles[lastOB.i]?.time ?? candles[0].time;
+          const endTime = candles[candles.length - 1].time;
+          drawOBBox(lastOB, startTime, endTime);
+        } else {
+          clearOBBox();
+        }
       }
 
       const iClosed = candles.length - 1;
       const sig = computeSignalAtClose(iClosed);
 
-      // 신호 전환 시만 마커 추가(렉 최소화)
       if (sig !== "WAIT" && sig !== lastSignal) {
         markers.push({
           time: candles[iClosed].time,
@@ -370,9 +364,8 @@ function startWS(symbol, interval) {
 
       const reasons = [];
       reasons.push(emaFastPrev > emaSlowPrev ? `EMA${EMA_FAST} > EMA${EMA_SLOW} (상승 우위)` : `EMA${EMA_FAST} < EMA${EMA_SLOW} (하락 우위)`);
-      if (lastOB) reasons.push(`최근 OB 표시: ${lastOB.type === "bull" ? "매수" : "매도"}`);
-      if (lastFVG) reasons.push(`최근 FVG 표시: ${lastFVG.type === "bull" ? "Bullish" : "Bearish"}`);
-      reasons.push("LONG/SHORT 마커: 신호 전환 시점에만 표시");
+      if (lastOB) reasons.push(`오더블럭(박스): ${lastOB.type === "bull" ? "매수 OB" : "매도 OB"}`);
+      reasons.push("마커: 신호 전환 시점만 표시");
       renderReasons(reasons);
 
       el.summary.textContent = sig === "LONG" ? "롱 우세" : sig === "SHORT" ? "숏 우세" : "관망";
@@ -392,6 +385,14 @@ function startWS(symbol, interval) {
   };
 }
 
+// ================== HELPERS ==================
+function redrawOB() {
+  if (!lastOB || !candles.length) return;
+  const startTime = candles[lastOB.j]?.time ?? candles[lastOB.i]?.time ?? candles[0].time;
+  const endTime = candles[candles.length - 1].time;
+  drawOBBox(lastOB, startTime, endTime);
+}
+
 // ================== MAIN ==================
 async function fullReload() {
   const symbol = el.symbol.value;
@@ -403,33 +404,29 @@ async function fullReload() {
   el.summary.textContent = "초기 데이터 불러오는 중…";
   setBadge("WAIT");
 
-  // WS 끊고 초기 데이터
   stopWS();
 
   candles = await fetchHistory(symbol, tf, limit);
 
-  // 차트/EMA 초기화
   candleSeries.setData(candles);
-  emaFastSeries.setData([]);
-  emaSlowSeries.setData([]);
   initEmaFromHistory();
 
-  // OB/FVG 초기 표시
   lastOB = detectLastOB(candles);
-  lastFVG = detectLastFVG(candles);
-  clearZoneLines();
-  drawZoneLines(lastOB, "OB");
-  drawZoneLines(lastFVG, "FVG");
-
-  // 마커 초기화
   markers = [];
   candleSeries.setMarkers(markers);
   lastSignal = "WAIT";
   setBadge("WAIT");
 
+  if (lastOB) {
+    const startTime = candles[lastOB.j]?.time ?? candles[lastOB.i]?.time ?? candles[0].time;
+    const endTime = candles[candles.length - 1].time;
+    drawOBBox(lastOB, startTime, endTime);
+  } else {
+    clearOBBox();
+  }
+
   chart.timeScale().fitContent();
 
-  // 실시간 시작(ON일 때만)
   if (el.auto.dataset.on === "1") startWS(symbol, tf);
   else el.summary.textContent = "실시간 OFF (수동 불러오기만)";
 }
@@ -439,12 +436,10 @@ el.reload.addEventListener("click", () => {
   fullReload().catch((e) => (el.summary.textContent = "에러: " + e.message));
 });
 
-// ✅ 봉/심볼/개수 바꾸면 “바로” 반영되게 자동 재로딩
 el.tf.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 el.symbol.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 el.limit.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 
-// 실시간 ON/OFF
 el.auto.textContent = "실시간 ON";
 el.auto.dataset.on = "1";
 
@@ -464,6 +459,9 @@ el.auto.addEventListener("click", () => {
   }
 });
 
+// ✅ 줌/스크롤/리사이즈에도 OB 박스 따라오게
+chart.timeScale().subscribeVisibleTimeRangeChange(() => redrawOB());
+window.addEventListener("resize", () => setTimeout(redrawOB, 0));
+
 // 최초 실행
 fullReload().catch((e) => (el.summary.textContent = "에러: " + e.message));
-
