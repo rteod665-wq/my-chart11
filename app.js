@@ -147,9 +147,21 @@ const chart = LightweightCharts.createChart(document.getElementById("chart"), {
   },
 });
 
-const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries);
-const emaFastSeries = chart.addSeries(LightweightCharts.LineSeries, { lineWidth: 2 });
-const emaSlowSeries = chart.addSeries(LightweightCharts.LineSeries, { lineWidth: 2 });
+// ✅ v3/v4/v5 호환: addSeries 있으면 그걸 쓰고, 없으면 v3 방식 사용
+const hasAddSeries = typeof chart.addSeries === "function";
+
+const candleSeries = hasAddSeries
+  ? chart.addSeries(LightweightCharts.CandlestickSeries)
+  : chart.addCandlestickSeries();
+
+const emaFastSeries = hasAddSeries
+  ? chart.addSeries(LightweightCharts.LineSeries, { lineWidth: 2 })
+  : chart.addLineSeries({ lineWidth: 2 });
+
+const emaSlowSeries = hasAddSeries
+  ? chart.addSeries(LightweightCharts.LineSeries, { lineWidth: 2 })
+  : chart.addLineSeries({ lineWidth: 2 });
+
 
 // OB/FVG 라인
 let obTop = null, obBot = null, fvgTop = null, fvgBot = null;
