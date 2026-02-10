@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>롱/숏 신호 차트 (OB/FVG/Fakeout)</title>
+  <title>롱/숏 신호 차트 (OB 박스)</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -11,7 +11,7 @@
     <div id="left">
       <div class="topbar">
         <div class="row">
-          <label>심볼</label>
+          <label for="symbol">심볼</label>
           <select id="symbol">
             <option value="BTCUSDT" selected>BTCUSDT</option>
             <option value="ETHUSDT">ETHUSDT</option>
@@ -20,7 +20,7 @@
             <option value="XRPUSDT">XRPUSDT</option>
           </select>
 
-          <label>봉</label>
+          <label for="tf">봉</label>
           <select id="tf">
             <option value="1s">1s</option>
             <option value="1m">1m</option>
@@ -31,7 +31,7 @@
             <option value="4h">4h</option>
           </select>
 
-          <label>개수</label>
+          <label for="limit">개수</label>
           <input id="limit" type="number" min="220" max="1000" step="10" value="500" />
         </div>
 
@@ -41,7 +41,11 @@
         </div>
       </div>
 
-      <div id="chart"></div>
+      <!-- ✅ 차트 + 오더블럭(OB) 박스 오버레이 -->
+      <div id="chartWrap">
+        <div id="chart"></div>
+        <div id="obLayer"></div>
+      </div>
     </div>
 
     <div id="right">
@@ -67,7 +71,7 @@
     </div>
   </div>
 
-  <!-- ✅ v4.2.0 고정 (setMarkers 등 호환) -->
+  <!-- ✅ v4 고정: setMarkers / addCandlestickSeries 호환 -->
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="./app.js"></script>
 </body>
