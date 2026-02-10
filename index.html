@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>롱/숏 신호 차트 (OB 박스)</title>
+  <title>롱/숏 신호 차트 (OB + 필터)</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -41,7 +41,6 @@
         </div>
       </div>
 
-      <!-- ✅ 차트 + 오더블럭(OB) 박스 오버레이 -->
       <div id="chartWrap">
         <div id="chart"></div>
         <div id="obLayer"></div>
@@ -72,7 +71,7 @@
     </div>
   </div>
 
-  <!-- ✅ v4 고정: setMarkers / addCandlestickSeries 호환 -->
+  <!-- v4 고정 -->
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="./app.js"></script>
 </body>
