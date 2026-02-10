@@ -311,7 +311,7 @@ function startWS(symbol, interval){
 
     // 너무 자주(초당 수십번) 전체 재계산하면 렉 → 1초에 1번만 계산
     const now = Date.now();
-    if(now - lastComputeAt < 1000) return;
+    if(now - lastComputeAt < 150) return;
     lastComputeAt = now;
 
     // EMA/신호/마커 업데이트(최근 데이터 기반)
