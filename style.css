@@ -8,6 +8,7 @@
 
 *{ box-sizing:border-box; }
 html, body { height:100%; }
+
 body{
   margin:0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
@@ -16,7 +17,7 @@ body{
 }
 
 #wrap{
-  height: 100vh;                 /* ✅ 전체 높이 고정 */
+  height: 100vh;
   display:flex;
   gap:12px;
   padding:12px;
@@ -72,10 +73,36 @@ button{
 }
 button:hover{ filter:brightness(1.1); }
 
+/* ✅ 차트 래퍼(오버레이 가능) */
+#chartWrap{
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 520px;
+  width: 100%;
+}
+
 #chart{
-  flex: 1 1 auto;                /* ✅ 남은 공간 전부 차트 */
-  min-height: 520px;             /* ✅ 최소 높이(중요!) */
-  width:100%;
+  position:absolute;
+  inset:0;
+}
+
+/* ✅ OB 박스 레이어 */
+#obLayer{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+}
+
+.ob-box{
+  position:absolute;
+  border-radius: 10px;
+  border: 1px solid rgba(46, 204, 113, 0.60);
+  background: rgba(46, 204, 113, 0.18);
+}
+
+.ob-box.bear{
+  border: 1px solid rgba(231, 76, 60, 0.60);
+  background: rgba(231, 76, 60, 0.18);
 }
 
 /* 오른쪽 패널 */
