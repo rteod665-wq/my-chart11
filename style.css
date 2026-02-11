@@ -152,6 +152,15 @@ button:hover{ filter:brightness(1.1); }
   font-size: 12px;
   color: var(--text);
 }
+.paperLog{
+  max-height: 180px;
+  overflow:auto;
+  padding:10px;
+  border:1px solid rgba(30,42,68,0.9);
+  border-radius:12px;
+  background: rgba(15,25,48,0.55);
+  white-space: pre-line;
+}
 
 .entryHint, .planHint{
   margin-top: 10px;
