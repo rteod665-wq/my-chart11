@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>롱/숏 신호 차트 (OB + 필터)</title>
+  <title>롱/숏 신호 차트 (OB + 필터 + 플랜)</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -22,7 +22,6 @@
 
           <label for="tf">봉</label>
           <select id="tf">
-            <option value="1s">1s</option>
             <option value="1m">1m</option>
             <option value="3m">3m</option>
             <option value="5m" selected>5m</option>
@@ -32,7 +31,22 @@
           </select>
 
           <label for="limit">개수</label>
-          <input id="limit" type="number" min="220" max="1000" step="10" value="500" />
+          <input id="limit" type="number" min="220" max="1000" step="10" value="600" />
+
+          <label for="rr">목표 R:R</label>
+          <select id="rr">
+            <option value="1.5">1.5R</option>
+            <option value="2" selected>2R</option>
+            <option value="3">3R</option>
+          </select>
+
+          <label for="obCount">OB 개수</label>
+          <select id="obCount">
+            <option value="1">1개</option>
+            <option value="3" selected>3개</option>
+            <option value="5">5개</option>
+            <option value="8">8개</option>
+          </select>
         </div>
 
         <div class="row">
@@ -64,14 +78,20 @@
       </div>
 
       <div class="card">
+        <div class="title">장 컨디션</div>
+        <div id="conditionText" class="muted">-</div>
+        <div class="muted" style="margin-top:6px;">(ATR 기반: 조용/보통/변동 큼)</div>
+      </div>
+
+      <div class="card">
         <div class="title">근거</div>
         <ul id="reasons" class="reasons"></ul>
         <div id="entryHint" class="entryHint muted">5분봉 기준 진입가 계산 대기…</div>
+        <div id="planHint" class="planHint muted">플랜 계산 대기…</div>
       </div>
     </div>
   </div>
 
-  <!-- v4 고정 -->
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="./app.js"></script>
 </body>
