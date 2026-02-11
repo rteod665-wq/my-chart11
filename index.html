@@ -85,6 +85,39 @@
 
       <div class="card">
         <div class="title">근거</div>
+        <div class="card">
+  <div class="h">
+    <div class="title">모의 자동매매</div>
+    <button id="paperToggle" data-on="0">OFF</button>
+  </div>
+
+  <div class="row">
+    <label for="paperCapital">초기자금(USDT)</label>
+    <input id="paperCapital" type="number" step="any" value="100" />
+  </div>
+
+  <div class="row">
+    <label for="paperLev">레버리지</label>
+    <input id="paperLev" type="number" step="1" value="10" />
+  </div>
+
+  <div class="row">
+    <label for="paperFee">수수료(왕복 %)</label>
+    <input id="paperFee" type="number" step="any" value="0.08" />
+  </div>
+
+  <div class="row">
+    <button id="paperReset">리셋</button>
+  </div>
+
+  <div class="muted" id="paperStatus">OFF</div>
+  <div class="muted" id="paperPnL">-</div>
+  <div class="muted" id="paperPos">포지션: 없음</div>
+
+  <div class="muted" style="margin-top:8px;">최근 거래</div>
+  <div id="paperLog" class="paperLog muted"></div>
+</div>
+
         <ul id="reasons" class="reasons"></ul>
         <div id="entryHint" class="entryHint muted">5분봉 기준 진입가 계산 대기…</div>
         <div id="planHint" class="planHint muted">플랜 계산 대기…</div>
