@@ -3,26 +3,20 @@ const KST_TZ = "Asia/Seoul";
 const BINANCE_REST = "https://api.binance.com/api/v3/klines";
 const BINANCE_WS_BASE = "wss://stream.binance.com:9443/ws";
 
-// 메인: 5m에서만 신호
 const MAIN_TF = "5m";
-const HTF = "15m"; // 상위 추세 필터
+const HTF = "15m";
 
 const EMA_FAST = 50;
 const EMA_SLOW = 200;
 
 const ATR_PERIOD = 14;
-// ATR/가격 비율이 이보다 낮으면 “너무 조용(횡보)”로 판단
-const ATR_MIN_RATIO = 0.001;  // 0.10%
-// 이보다 크면 “변동성 큼”
+const ATR_MIN_RATIO = 0.001;   // 0.10%
 const ATR_HIGH_RATIO = 0.0022; // 0.22%
 
-// OB 박스 끝을 “현재 시간”까지 연장(바이낸스 느낌)
-const OB_TIME_EXTEND_SECONDS = 60 * 60 * 6; // 6시간 정도
-
+const OB_TIME_EXTEND_SECONDS = 60 * 60 * 6;
 const UI_THROTTLE_MS = 120;
 const HEAVY_THROTTLE_MS = 900;
 
-// 손절 버퍼(OB 살짝 아래/위)
 const SL_BUFFER = 0.001; // 0.1%
 
 // ================== DOM ==================
@@ -42,6 +36,16 @@ const el = {
   reasons: document.getElementById("reasons"),
   entryHint: document.getElementById("entryHint"),
   planHint: document.getElementById("planHint"),
+
+  paperToggle: document.getElementById("paperToggle"),
+  paperReset: document.getElementById("paperReset"),
+  paperCapital: document.getElementById("paperCapital"),
+  paperLev: document.getElementById("paperLev"),
+  paperFee: document.getElementById("paperFee"),
+  paperStatus: document.getElementById("paperStatus"),
+  paperPnL: document.getElementById("paperPnL"),
+  paperPos: document.getElementById("paperPos"),
+  paperLog: document.getElementById("paperLog"),
 };
 
 const chartEl = document.getElementById("chart");
@@ -97,8 +101,7 @@ function calcATR(candles, period = 14) {
 }
 
 // ================== PATTERNS ==================
-// OB(간단): 큰 임펄스 직전 마지막 반대 캔들
-function detectOBs(candles, scan = 420, maxCount = 5) {
+function detectOBs(candles, scan = 520, maxCount = 3) {
   const start = Math.max(5, candles.length - scan);
   const bodies = candles.slice(start).map(bodySize);
   const avg = bodies.reduce((a, b) => a + b, 0) / Math.max(1, bodies.length);
@@ -122,12 +125,10 @@ function detectOBs(candles, scan = 420, maxCount = 5) {
     if (found) out.push(found);
   }
 
-  // 시간 기준으로 최신 maxCount개
   out.sort((a, b) => b.t - a.t);
   return out.slice(0, maxCount);
 }
 
-// OB 안에서 반전 캔들(꼬리 + 되돌림)
 function isRejectionCandle(c) {
   const body = Math.abs(c.close - c.open);
   const upperWick = c.high - Math.max(c.close, c.open);
@@ -139,7 +140,7 @@ function isRejectionCandle(c) {
 const chart = LightweightCharts.createChart(chartEl, {
   layout: { background: { color: "#101a2e" }, textColor: "#d7dbe7" },
   grid: { vertLines: { color: "#1e2a44" }, horzLines: { color: "#1e2a44" } },
-  timeScale: { timeVisible: true, secondsVisible: true },
+  timeScale: { timeVisible: true, secondsVisible: false },
   rightPriceScale: { borderColor: "#223054" },
   crosshair: { mode: 1 },
   localization: {
@@ -165,14 +166,11 @@ function clearOBBoxes() {
   for (const x of obBoxes) x.el.remove();
   obBoxes = [];
 }
-
 function drawOBBoxes(obs, endTimeSec) {
   clearOBBoxes();
   if (!obs || !obs.length) return;
 
-  // 최신이 제일 진하게
   const sorted = [...obs].sort((a, b) => b.t - a.t);
-
   for (let idx = 0; idx < sorted.length; idx++) {
     const ob = sorted[idx];
     const box = document.createElement("div");
@@ -182,10 +180,8 @@ function drawOBBoxes(obs, endTimeSec) {
     obLayer.appendChild(box);
     obBoxes.push({ ob, el: box });
   }
-
   redrawOBBoxes(endTimeSec);
 }
-
 function redrawOBBoxes(endTimeSec) {
   if (!obBoxes.length || !candles.length) return;
 
@@ -221,7 +217,7 @@ function redrawOBBoxes(endTimeSec) {
   }
 }
 
-// ================== ENTRY + PLAN TEXT ==================
+// ================== ENTRY + PLAN ==================
 function setEntryHintText(tf, ob){
   if(tf !== MAIN_TF){
     el.entryHint.innerHTML = `현재는 <b>${tf}</b>입니다. 신호/진입 기준은 <b>${MAIN_TF}</b> 입니다.`;
@@ -265,11 +261,11 @@ function setPlanHint(sig, ob, rr){
   let sl, tp, risk;
   if (sig === "LONG") {
     sl = bot * (1 - SL_BUFFER);
-    risk = Math.max(0.0000001, entry - sl);
+    risk = Math.max(1e-9, entry - sl);
     tp = entry + rr * risk;
   } else {
     sl = top * (1 + SL_BUFFER);
-    risk = Math.max(0.0000001, sl - entry);
+    risk = Math.max(1e-9, sl - entry);
     tp = entry - rr * risk;
   }
 
@@ -296,10 +292,9 @@ let lastHeavyAt = 0;
 let lastSignal = "WAIT";
 let markers = [];
 
-let obs = [];       // 여러 OB
-let lastOB = null;  // 최신 OB
+let obs = [];
+let lastOB = null;
 
-// 상위 TF 상태
 let htfCandles = [];
 let htfEmaFast = null;
 let htfEmaSlow = null;
@@ -325,7 +320,6 @@ function initEmaFromHistory() {
   emaSlowPrev = null;
   emaFastSeries.setData([]);
   emaSlowSeries.setData([]);
-
   for (const c of candles) {
     emaFastPrev = emaNext(emaFastPrev, c.close, EMA_FAST);
     emaSlowPrev = emaNext(emaSlowPrev, c.close, EMA_SLOW);
@@ -334,7 +328,6 @@ function initEmaFromHistory() {
   }
 }
 
-// 상위 TF EMA 계산
 function initHTF() {
   htfEmaFast = null;
   htfEmaSlow = null;
@@ -353,9 +346,8 @@ function updateConditionText() {
   const atr = calcATR(candles, ATR_PERIOD);
   if (!atr || !candles.length) {
     el.conditionText.textContent = "컨디션 계산 대기…";
-    return { atr: null, ratio: null, label: "대기" };
+    return;
   }
-
   const price = candles[candles.length - 1].close;
   const ratio = atr / price;
 
@@ -369,8 +361,6 @@ function updateConditionText() {
   el.conditionText.innerHTML =
     `상위(${HTF}) 추세: <b>${trendTxt}</b><br>` +
     `ATR(${ATR_PERIOD})/가격: <b>${(ratio*100).toFixed(2)}%</b> → <b>${label}</b>`;
-
-  return { atr, ratio, label };
 }
 
 // ================== SIGNAL ==================
@@ -381,12 +371,10 @@ function computeSignalAtClose(iClosed) {
     return { sig: "WAIT", reasons: [`메인 기준은 ${MAIN_TF}입니다.`], obUsed: null };
   }
 
-  // 상위 TF 추세 필터
   const trend = htfTrend();
   if (!trend) return { sig: "WAIT", reasons: ["상위 TF 추세 계산 대기"], obUsed: null };
   reasons.push(`상위(${HTF}) 추세: ${trend === "UP" ? "상승" : "하락"}`);
 
-  // 변동성 필터
   const atr = calcATR(candles, ATR_PERIOD);
   const ratio = atr ? atr / candles[candles.length - 1].close : null;
   if (!atr || ratio < ATR_MIN_RATIO) {
@@ -394,25 +382,21 @@ function computeSignalAtClose(iClosed) {
   }
   reasons.push("변동성 OK");
 
-  // OB 존재
   if (!lastOB) return { sig: "WAIT", reasons: [...reasons, "오더블럭(OB) 없음"], obUsed: null };
   reasons.push(`최신 OB: ${lastOB.type === "bull" ? "매수" : "매도"}`);
 
   const c = candles[iClosed];
 
-  // OB 안 진입
   if (!inZone(c.close, lastOB)) {
     return { sig: "WAIT", reasons: [...reasons, "가격이 OB 구간 밖"], obUsed: lastOB };
   }
   reasons.push("가격이 OB 구간 안");
 
-  // 반전 캔들 확인
   if (!isRejectionCandle(c)) {
     return { sig: "WAIT", reasons: [...reasons, "반전(거절) 캔들 미확인"], obUsed: lastOB };
   }
   reasons.push("반전(거절) 캔들 확인");
 
-  // 방향 필터: OB 방향 + 상위 추세 일치만
   if (lastOB.type === "bull" && trend === "UP") {
     return { sig: "LONG", reasons: [...reasons, "상위 상승 + 매수 OB"], obUsed: lastOB };
   }
@@ -421,6 +405,143 @@ function computeSignalAtClose(iClosed) {
   }
   return { sig: "WAIT", reasons: [...reasons, "상위 추세와 OB 방향 불일치"], obUsed: lastOB };
 }
+
+// ================== PAPER TRADING ==================
+class PaperBroker {
+  constructor() { this.reset(100, 10, 0.0008); }
+
+  reset(capital, leverage, feeRateRoundTrip){
+    this.initial = capital;
+    this.balance = capital;
+    this.leverage = leverage;
+    this.feeRT = feeRateRoundTrip; // 왕복 수수료율
+    this.pos = null; // { side, entry, qty, sl, tp, entryTime }
+    this.trades = [];
+  }
+
+  equity(lastPrice){
+    if(!this.pos) return this.balance;
+    const { side, entry, qty } = this.pos;
+    const pnl = (side==="LONG") ? (lastPrice-entry)*qty : (entry-lastPrice)*qty;
+    return this.balance + pnl;
+  }
+
+  calcQty(price){
+    const notional = this.balance * this.leverage;
+    return notional / price;
+  }
+
+  open(side, entry, sl, tp, time){
+    if(this.pos) return false;
+
+    const qty = this.calcQty(entry);
+    const notional = entry * qty;
+
+    // 단순화: 왕복 수수료를 진입 시 한 번에 차감
+    const fee = notional * this.feeRT;
+    this.balance -= fee;
+
+    this.pos = { side, entry, qty, sl, tp, entryTime: time, fee };
+    return true;
+  }
+
+  close(exit, reason, time){
+    if(!this.pos) return false;
+    const { side, entry, qty } = this.pos;
+
+    const pnl = (side==="LONG") ? (exit-entry)*qty : (entry-exit)*qty;
+    this.balance += pnl;
+
+    const pnlPct = (pnl / this.initial) * 100;
+    this.trades.unshift({ side, entry, exit, pnl, pnlPct, reason, time });
+
+    this.pos = null;
+    return true;
+  }
+
+  // ✅ 더 현실적으로: 고가/저가로 SL/TP 판정 (종가만 보는 것보다 훨씬 낫다)
+  onCandleClose(c){
+    if(!this.pos) return;
+
+    if(this.pos.side==="LONG"){
+      // 같은 캔들에서 SL/TP 둘 다 닿으면 보수적으로 SL 우선 처리
+      if(c.low <= this.pos.sl) this.close(this.pos.sl, "SL", c.time);
+      else if(c.high >= this.pos.tp) this.close(this.pos.tp, "TP", c.time);
+    }else{
+      if(c.high >= this.pos.sl) this.close(this.pos.sl, "SL", c.time);
+      else if(c.low <= this.pos.tp) this.close(this.pos.tp, "TP", c.time);
+    }
+  }
+}
+
+const paper = new PaperBroker();
+let paperOn = false;
+
+function paperApplySettings(){
+  const cap = Number(el.paperCapital.value);
+  const lev = Number(el.paperLev.value);
+  const feeRt = Number(el.paperFee.value) / 100;
+  paper.reset(cap, lev, feeRt);
+}
+
+function uiPaperUpdate(lastPrice){
+  const eq = paper.equity(lastPrice);
+  const profit = eq - paper.initial;
+  const profitPct = (profit / paper.initial) * 100;
+
+  el.paperStatus.textContent = paperOn ? "ON (모의매매)" : "OFF";
+  el.paperPnL.textContent =
+    `잔고: ${eq.toFixed(2)} USDT | 손익: ${profit.toFixed(2)} (${profitPct.toFixed(2)}%)`;
+
+  if(!paper.pos){
+    el.paperPos.textContent = "포지션: 없음";
+  }else{
+    const p = paper.pos;
+    el.paperPos.textContent =
+      `포지션: ${p.side} | 진입 ${p.entry.toFixed(2)} | SL ${p.sl.toFixed(2)} | TP ${p.tp.toFixed(2)}`;
+  }
+
+  const lines = paper.trades.slice(0, 8).map(t => {
+    const sign = t.pnl >= 0 ? "+" : "";
+    return `${new Date(t.time*1000).toLocaleString("ko-KR")}  ${t.side}  ${t.reason}  ${sign}${t.pnl.toFixed(2)} USDT`;
+  });
+  el.paperLog.textContent = lines.join("\n") || "거래 없음";
+}
+
+function paperTryEnter(sig, obUsed, rr, time){
+  if(!paperOn) return;
+  if(!obUsed) return;
+  if(paper.pos) return;
+
+  const top = Math.max(obUsed.from, obUsed.to);
+  const bot = Math.min(obUsed.from, obUsed.to);
+  const entry = (top + bot) / 2;
+
+  let sl, tp, risk;
+  if(sig === "LONG"){
+    sl = bot * (1 - SL_BUFFER);
+    risk = Math.max(1e-9, entry - sl);
+    tp = entry + rr * risk;
+    paper.open("LONG", entry, sl, tp, time);
+  } else if(sig === "SHORT"){
+    sl = top * (1 + SL_BUFFER);
+    risk = Math.max(1e-9, sl - entry);
+    tp = entry - rr * risk;
+    paper.open("SHORT", entry, sl, tp, time);
+  }
+}
+
+// UI 버튼
+el.paperToggle.addEventListener("click", () => {
+  paperOn = !paperOn;
+  el.paperToggle.dataset.on = paperOn ? "1" : "0";
+  el.paperToggle.textContent = paperOn ? "ON" : "OFF";
+  uiPaperUpdate(candles?.[candles.length-1]?.close ?? 0);
+});
+el.paperReset.addEventListener("click", () => {
+  paperApplySettings();
+  uiPaperUpdate(candles?.[candles.length-1]?.close ?? 0);
+});
 
 // ================== WS ==================
 function stopWS() {
@@ -435,9 +556,7 @@ function startWS(symbol, interval) {
   el.summary.textContent = `실시간 연결중… (${symbol} ${interval})`;
   ws = new WebSocket(url);
 
-  ws.onopen = () => {
-    el.summary.textContent = `실시간 연결됨 ✅ (${symbol} ${interval})`;
-  };
+  ws.onopen = () => { el.summary.textContent = `실시간 연결됨 ✅ (${symbol} ${interval})`; };
 
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
@@ -457,7 +576,6 @@ function startWS(symbol, interval) {
     const last = candles[candles.length - 1];
     if (!last) return;
 
-    // 캔들 업데이트
     if (bar.time > last.time) {
       candles.push(bar);
       const max = Number(el.limit.value);
@@ -482,38 +600,35 @@ function startWS(symbol, interval) {
     if (now - lastUIAt >= UI_THROTTLE_MS) {
       lastUIAt = now;
       el.lastPrice.textContent = fmt(bar.close);
-
       const fastNow = emaNext(emaFastPrev, bar.close, EMA_FAST);
       const slowNow = emaNext(emaSlowPrev, bar.close, EMA_SLOW);
       el.trendText.textContent = `EMA${EMA_FAST} ${fmt(fastNow)} / EMA${EMA_SLOW} ${fmt(slowNow)}`;
+
+      // 모의매매 UI는 계속 갱신
+      uiPaperUpdate(bar.close);
     }
 
-    // 마감봉에서만 무거운 작업
     if (isClosed) {
+      // ✅ 먼저 모의매매 SL/TP 체크(해당 봉 고가/저가 기준)
+      paper.onCandleClose(candles[candles.length - 1]);
+
       if (now - lastHeavyAt >= HEAVY_THROTTLE_MS) {
         lastHeavyAt = now;
 
-        // OB 갱신(여러 개)
         const count = Number(el.obCount.value);
         obs = detectOBs(candles, 520, count);
         lastOB = obs[0] ?? null;
 
-        // OB 박스 그리기
         const endTime = candles[candles.length - 1].time + OB_TIME_EXTEND_SECONDS;
         drawOBBoxes(obs, endTime);
 
-        // 컨디션 텍스트 갱신
         updateConditionText();
-
-        // 5분봉 기준 텍스트
         setEntryHintText(el.tf.value, lastOB);
       }
 
-      // 신호 계산
       const iClosed = candles.length - 1;
       const { sig, reasons, obUsed } = computeSignalAtClose(iClosed);
 
-      // 신호 전환 시 마커
       if (sig !== "WAIT" && sig !== lastSignal) {
         markers.push({
           time: candles[iClosed].time,
@@ -528,15 +643,18 @@ function startWS(symbol, interval) {
       setBadge(sig);
       renderReasons(reasons);
 
-      // 플랜 제안
       const rr = Number(el.rr.value);
       setPlanHint(sig, obUsed, rr);
 
+      // ✅ 모의 자동매매: 신호 확정 시 진입 시도
+      paperTryEnter(sig, obUsed, rr, candles[iClosed].time);
+
       el.summary.textContent = sig === "LONG" ? "롱 우세" : sig === "SHORT" ? "숏 우세" : "관망";
 
-      // 박스 위치 재계산(보이는 범위 변경/업데이트 대비)
       const endTime = candles[candles.length - 1].time + OB_TIME_EXTEND_SECONDS;
       redrawOBBoxes(endTime);
+
+      uiPaperUpdate(candles[candles.length - 1].close);
     }
   };
 
@@ -544,9 +662,7 @@ function startWS(symbol, interval) {
   ws.onclose = () => {
     if (!wsWanted) return;
     el.summary.textContent = "실시간 끊김… 재연결";
-    setTimeout(() => {
-      if (wsWanted) startWS(el.symbol.value, el.tf.value);
-    }, 1200);
+    setTimeout(() => { if (wsWanted) startWS(el.symbol.value, el.tf.value); }, 1200);
   };
 }
 
@@ -560,16 +676,13 @@ async function fullReload() {
   setBadge("WAIT");
   stopWS();
 
-  // 메인 TF
   candles = await fetchHistory(symbol, tf, limit);
   candleSeries.setData(candles);
   initEmaFromHistory();
 
-  // 상위 TF
   htfCandles = await fetchHistory(symbol, HTF, 300);
   initHTF();
 
-  // OB 여러 개
   const count = Number(el.obCount.value);
   obs = detectOBs(candles, 520, count);
   lastOB = obs[0] ?? null;
@@ -586,6 +699,10 @@ async function fullReload() {
   updateConditionText();
   setPlanHint("WAIT", lastOB, Number(el.rr.value));
 
+  // 모의매매 초기화 UI 갱신
+  if (!paper.initial) paperApplySettings();
+  uiPaperUpdate(candles[candles.length - 1].close);
+
   chart.timeScale().fitContent();
 
   if (el.auto.dataset.on === "1") startWS(symbol, tf);
@@ -597,11 +714,10 @@ el.reload.addEventListener("click", () => fullReload().catch(e => el.summary.tex
 el.tf.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 el.symbol.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 el.limit.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
+el.obCount.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 el.rr.addEventListener("change", () => {
-  // RR만 바뀌면 플랜만 다시 계산
   setPlanHint(lastSignal, lastOB, Number(el.rr.value));
 });
-el.obCount.addEventListener("change", () => fullReload().catch(e => el.summary.textContent = "에러: " + e.message));
 
 el.auto.textContent = "실시간 ON";
 el.auto.dataset.on = "1";
@@ -621,7 +737,6 @@ el.auto.addEventListener("click", () => {
   }
 });
 
-// 줌/스크롤/리사이즈 때 박스 다시 그리기
 chart.timeScale().subscribeVisibleTimeRangeChange(() => {
   if (!candles.length) return;
   const endTime = candles[candles.length - 1].time + OB_TIME_EXTEND_SECONDS;
